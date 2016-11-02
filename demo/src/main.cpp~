@@ -1,0 +1,222 @@
+#include <stdio.h>
+#include <GL/freeglut.h>
+#include "kdtree.hpp"
+
+static int pts_num = 0;
+static float * bunny_pts = 0;
+static float xmin, xmax, ymin, ymax, zmin,zmax;
+
+static float ang_h =40.0f;
+static float ang_v =0.0f;
+static float zoom = 1.0f;
+static float ray_pos0[3];
+static float ray_pos1[3];
+
+static int steps = 50;
+static ckdtree tree;
+static int win_size[2];
+
+static void
+reshape(int width, int height)
+{
+	float ar, det=0.05;
+
+	win_size[0] = width;
+	win_size[1] = height;
+
+	glViewport ( 0, 0, width, height ) ;
+	glMatrixMode ( GL_PROJECTION ) ;
+	glLoadIdentity();
+
+	glOrtho(xmin-det, xmax+det, ymin-det, ymax+det, zmin-1000.0f, zmax);
+
+	glMatrixMode ( GL_MODELVIEW ) ;
+	glLoadIdentity () ;
+
+}
+
+static void
+draw(void)
+{
+	int i;
+    // Black background
+	glMatrixMode ( GL_MODELVIEW ) ;
+	glLoadIdentity () ;
+	glTranslatef( (xmin+xmax)*0.5f,
+				  (ymin+ymax)*0.5f,
+				  (zmin+zmax)*0.5f);
+	glRotatef(ang_v, 1.0f, 0, 0);
+	glRotatef(ang_h, 0, 1.0f, 0);
+	glScalef(zoom, zoom, zoom);
+	glTranslatef( -(xmin+xmax)*0.5f,
+				  -(ymin+ymax)*0.5f,
+				  -(zmin+zmax)*0.5f);
+
+
+    glClearColor(1.0f,1.0f,1.0f,1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    //Draw i
+	glColor4f(0.5f, 0.5f, 0.5f, 1.0);
+	glBegin (GL_POINTS) ;
+	for(i=0; i<pts_num; i++){
+		glVertex3f(bunny_pts[3*i],
+				   bunny_pts[3*i+1],
+				   bunny_pts[3*i+2]);
+	}
+	glEnd();
+
+	glColor4f(0.0f, 0.0f, 1.0f, 1.0);
+	glBegin(GL_LINES);
+	glVertex3fv(ray_pos0);
+	glVertex3fv(ray_pos1);
+	glEnd();
+
+	struct kdpoint pt;
+	float xdet = (ray_pos1[0] - ray_pos0[0] )/steps;
+	float ydet = (ray_pos1[1] - ray_pos0[1] )/steps;
+	float zdet = (ray_pos1[2] - ray_pos0[2] )/steps;
+
+	pt.val[0] = ray_pos0[0];
+	pt.val[1] = ray_pos0[1];
+	pt.val[2] = ray_pos0[2];
+
+	glColor4f(1.0f, 0.0f, 0.0f, 1.0);
+	glBegin(GL_LINES);
+	int pt_idx;
+	struct kdpoint nearest;
+	kdfloat distance;
+	for(int i=0; i<steps; i++){
+		tree.find_nearest(&pt, &pt_idx, &nearest, &distance);
+#if 0
+		tree.verify_nearest(&pt, pt_idx, distance);
+#endif
+		glVertex3fv(&pt.val[0]);
+		glVertex3fv(&nearest.val[0]);
+
+		pt.val[0] += xdet;
+		pt.val[1] += ydet;
+		pt.val[2] += zdet;
+	}
+	glEnd();
+    glutSwapBuffers();
+}
+
+static void
+key(unsigned char key, int x, int y)
+{
+	int need_redisplay = 1;
+	switch (key) {
+	case 27:  /* Escape key */
+		break;
+	case '+' :
+		++steps ;
+		break ;
+	case '-' :
+		--steps ;
+		if (steps < 2)
+			steps = 2;
+		break ;
+	}
+}
+
+static bool op_rotate = false;
+
+static int op_pos[2];
+void on_mouse(int button, int state, int x, int y) {
+    if (button == 0) {
+        if(state == GLUT_DOWN){
+			op_rotate = true;
+			op_pos[0] = x;
+			op_pos[1] = y;
+		}
+		if (state == GLUT_UP) {
+			op_rotate = false;
+		}
+		glutPostRedisplay();
+	} else if (button == 3 || button == 4){
+		if (button == 3)
+			zoom += 0.02;
+		else
+			zoom -= 0.02;
+		if (zoom < 0.0001)
+			zoom = 0.0001;
+		if (zoom > 25.0f)
+			zoom = 25.0f;
+		glutPostRedisplay();
+	}
+}
+
+void on_motion(int x, int y) {
+	if (op_rotate){
+		ang_h += 180.0f*(float)(x-op_pos[0])/(float)win_size[0];
+		ang_v += 180.0f*(float)(y-op_pos[1])/(float)win_size[1];
+		glutPostRedisplay();
+		op_pos[0] = x;
+		op_pos[1] = y;
+	}
+}
+
+static void
+idle()
+{
+	float dety = (ymax-ymin)/200.0f;
+	ray_pos0[1] -= dety;
+	ray_pos1[1] += dety;
+
+	if (ray_pos0[1] < ymin){
+		ray_pos0[1] = ymax;
+	}
+	if (ray_pos1[1] > ymax){
+		ray_pos1[1] = ymin;
+	}
+	glutPostRedisplay();
+;
+}
+bool load_bunny(const char * path,
+				float ** pts, int *num,
+				float *xmin, float *xmax,
+				float *ymin, float *ymax,
+				float *zmin, float *zmax);
+int main(int argc, char **argv)
+{
+	if (argc != 2){
+		printf("usage: kdtree_demo bunnyData.pts\n");
+		return 0;
+	}
+	if (!load_bunny(argv[1], &bunny_pts, &pts_num,
+			&xmin, &xmax,
+			&ymin, &ymax,
+			&zmin, &zmax )){
+		printf("load file failed. %s\n", argv[1]);
+		return 0;
+	}
+	ray_pos0[0] = xmax;
+	ray_pos0[1] = ymax;
+	ray_pos0[2] = zmax;
+
+	ray_pos1[0] = xmin;
+	ray_pos1[1] = ymin;
+	ray_pos1[2] = zmin;
+
+	struct kdpoints points;
+	points.num = pts_num;
+	points.points = (kdpoint *)bunny_pts;
+	if(!tree.build(&points)){
+		printf("kdtree build failed\n");
+		return 0;
+	}
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE);
+	glutInitWindowPosition(50, 25);
+	glutInitWindowSize(640,640);
+	glutCreateWindow("KDBunny");
+	glutReshapeFunc(reshape);
+	glutDisplayFunc(draw);
+	glutKeyboardFunc(key);
+	glutMouseFunc(on_mouse);
+	glutMotionFunc(on_motion);
+	glutIdleFunc(idle);
+
+	glutMainLoop();
+	return 0;
+}
