@@ -1,3 +1,3 @@
-This is the kdtree implementation, written by Leo Xu.
+kdtree implementation in c code.
 
 
